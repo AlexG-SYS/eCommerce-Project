@@ -1,0 +1,76 @@
+package mailer
+
+import (
+	"bytes"
+	"embed"
+	"html/template"
+	"time"
+
+	"github.com/go-mail/mail/v2"
+)
+
+// Below we declare a variable with the type embed.FS to hold our email templates.
+// This allows us to bundle the templates into the binary.
+//
+//go:embed "templates/*"
+var templateFS embed.FS
+
+type Mailer struct {
+	dialer *mail.Dialer
+	sender string
+}
+
+func New(host string, port int, username, password, sender string) Mailer {
+	dialer := mail.NewDialer(host, port, username, password)
+	dialer.Timeout = 5 * time.Second
+
+	return Mailer{
+		dialer: dialer,
+		sender: sender,
+	}
+}
+
+func (m Mailer) Send(recipient, templateFile string, data any) error {
+	// Parse the template file from the embedded file system.
+	tmpl, err := template.New("email").ParseFS(templateFS, "templates/"+templateFile)
+	if err != nil {
+		return err
+	}
+
+	// Execute the "subject" template
+	subject := new(bytes.Buffer)
+	err = tmpl.ExecuteTemplate(subject, "subject", data)
+	if err != nil {
+		return err
+	}
+
+	// Execute the "plainBody" template
+	plainBody := new(bytes.Buffer)
+	err = tmpl.ExecuteTemplate(plainBody, "plainBody", data)
+	if err != nil {
+		return err
+	}
+
+	// Execute the "htmlBody" template
+	htmlBody := new(bytes.Buffer)
+	err = tmpl.ExecuteTemplate(htmlBody, "htmlBody", data)
+	if err != nil {
+		return err
+	}
+
+	// Initialize a new mail.Message instance
+	msg := mail.NewMessage()
+	msg.SetHeader("To", recipient)
+	msg.SetHeader("From", m.sender)
+	msg.SetHeader("Subject", subject.String())
+	msg.SetBody("text/plain", plainBody.String())
+	msg.AddAlternative("text/html", htmlBody.String())
+
+	// Send the email
+	err = m.dialer.DialAndSend(msg)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
