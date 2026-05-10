@@ -12,6 +12,7 @@ import (
 type User struct {
 	UserID    int64     `json:"user_id"`
 	Email     string    `json:"email"`
+	FullName  string    `json:"full_name"`
 	Password  string    `json:"-"` // Never export the hash in JSON!
 	Role      string    `json:"role"`
 	Activated bool      `json:"activated"`
@@ -186,9 +187,12 @@ func (m ProfileModel) Update(p *Profile) error {
 // GetByEmail retrieves a user from the database based on their email address.
 func (m UserModel) GetByEmail(email string) (*User, error) {
 	query := `
-        SELECT user_id, email, password, activated, role, created_at
-        FROM users
-        WHERE email = $1`
+        SELECT 
+            u.user_id, u.email, u.password, u.activated, u.role, u.created_at,
+            p.full_name
+        FROM users u
+        INNER JOIN profiles p ON u.user_id = p.user_id
+        WHERE u.email = $1`
 
 	var user User
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -201,6 +205,7 @@ func (m UserModel) GetByEmail(email string) (*User, error) {
 		&user.Activated,
 		&user.Role,
 		&user.CreatedAt,
+		&user.FullName,
 	)
 
 	if err != nil {

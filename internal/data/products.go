@@ -2,6 +2,7 @@ package data
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -10,22 +11,32 @@ import (
 type Product struct {
 	ProductID     int64     `json:"product_id"`
 	CategoryID    int64     `json:"category_id"`
+	CategoryName  string    `json:"category_name,omitempty"`
 	Name          string    `json:"name"`
 	Description   string    `json:"description,omitempty"`
 	IsGstEligible bool      `json:"is_gst_eligible"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	Variants      []Variant `json:"variants,omitempty"`
+	CreatedAt     time.Time `json:"created_at,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
 type Variant struct {
-	VariantID    int64     `json:"variant_id"`
-	ProductID    int64     `json:"product_id"`
-	SKU          string    `json:"sku"`
-	SizeAttr     string    `json:"size_attr"`
-	ColorAttr    string    `json:"color_attr"`
-	CostPrice    float64   `json:"cost_price"`
-	SellingPrice float64   `json:"selling_price"`
-	CreatedAt    time.Time `json:"created_at"`
+	VariantID      int64               `json:"variant_id"`
+	ProductID      int64               `json:"product_id"`
+	SKU            string              `json:"sku"`
+	SizeAttr       string              `json:"size_attr"`
+	ColorAttr      string              `json:"color_attr"`
+	ImageURL       string              `json:"image_url,omitempty"`
+	CostPrice      float64             `json:"cost_price,omitempty"`
+	SellingPrice   float64             `json:"selling_price"`
+	TotalInventory int                 `json:"total_inventory,omitempty"`
+	InventoryLocs  []InventoryLocation `json:"inventory_locations,omitempty"`
+	CreatedAt      time.Time           `json:"created_at,omitempty"`
+}
+
+type InventoryLocation struct {
+	LocationName string `json:"location_name"`
+	Stock        int    `json:"stock"`
 }
 
 type ProductModel struct {
@@ -75,17 +86,147 @@ func (m ProductModel) InsertVariant(v *Variant) error {
 }
 
 func (m ProductModel) GetProduct(id int64) (*Product, error) {
-	var p Product
-	// Added updated_at to the SELECT
-	query := `SELECT product_id, name, description, category_id, is_gst_eligible, created_at, updated_at 
-              FROM products WHERE product_id = $1`
-	err := m.DB.QueryRow(query, id).Scan(
-		&p.ProductID, &p.Name, &p.Description, &p.CategoryID, &p.IsGstEligible, &p.CreatedAt, &p.UpdatedAt,
+
+	var product Product
+
+	// ------------------------------------------
+	// 1. Load Product
+	// ------------------------------------------
+
+	productQuery := `
+		SELECT
+			p.product_id,
+			p.category_id,
+			c.name,
+			p.name,
+			p.description,
+			p.is_gst_eligible,
+			p.created_at,
+			p.updated_at
+		FROM products p
+		LEFT JOIN categories c
+			ON c.category_id = p.category_id
+		WHERE p.product_id = $1
+	`
+
+	err := m.DB.QueryRow(productQuery, id).Scan(
+		&product.ProductID,
+		&product.CategoryID,
+		&product.CategoryName,
+		&product.Name,
+		&product.Description,
+		&product.IsGstEligible,
+		&product.CreatedAt,
+		&product.UpdatedAt,
 	)
+
 	if err != nil {
 		return nil, err
 	}
-	return &p, nil
+
+	// ------------------------------------------
+	// 2. Load Variants
+	// ------------------------------------------
+
+	variantQuery := `
+		SELECT
+			variant_id,
+			product_id,
+			sku,
+			size_attr,
+			color_attr,
+			image_url,
+			cost_price,
+			selling_price,
+			created_at
+		FROM product_variants
+		WHERE product_id = $1
+		ORDER BY variant_id ASC
+	`
+
+	rows, err := m.DB.Query(variantQuery, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var variants []Variant
+
+	for rows.Next() {
+
+		var variant Variant
+
+		err := rows.Scan(
+			&variant.VariantID,
+			&variant.ProductID,
+			&variant.SKU,
+			&variant.SizeAttr,
+			&variant.ColorAttr,
+			&variant.ImageURL,
+			&variant.CostPrice,
+			&variant.SellingPrice,
+			&variant.CreatedAt,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		// ------------------------------------------
+		// 3. Load Inventory Locations
+		// ------------------------------------------
+
+		inventoryQuery := `
+			SELECT
+				l.name,
+				(i.stock_on_hand - i.stock_reserved) AS stock
+			FROM inventory i
+			JOIN locations l
+				ON l.location_id = i.location_id
+			WHERE i.variant_id = $1
+		`
+
+		invRows, err := m.DB.Query(
+			inventoryQuery,
+			variant.VariantID,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		totalInventory := 0
+
+		for invRows.Next() {
+
+			var inv InventoryLocation
+
+			err := invRows.Scan(
+				&inv.LocationName,
+				&inv.Stock,
+			)
+
+			if err != nil {
+				invRows.Close()
+				return nil, err
+			}
+
+			totalInventory += inv.Stock
+
+			variant.InventoryLocs =
+				append(variant.InventoryLocs, inv)
+		}
+
+		invRows.Close()
+
+		variant.TotalInventory = totalInventory
+
+		variants = append(variants, variant)
+	}
+
+	product.Variants = variants
+
+	return &product, nil
 }
 
 func (m ProductModel) GetVariant(id int64) (*Variant, error) {
@@ -132,12 +273,24 @@ func (m ProductModel) GetVariantByProduct(productID int64) ([]*Variant, error) {
 func (m ProductModel) GetAllProducts(name string, categoryID int, f Filters) ([]*Product, Metadata, error) {
 	// Construct the query with dynamic sorting
 	query := fmt.Sprintf(`
-        SELECT count(*) OVER(), product_id, category_id, name, description, is_gst_eligible, created_at, updated_at
-        FROM products
-        WHERE (LOWER(name) LIKE LOWER($1) || '%%' OR $1 = '')
-        AND (category_id = $2 OR $2 = 0)
-        ORDER BY %s %s, product_id ASC
-        LIMIT $3 OFFSET $4`, f.sortColumn(), f.sortDirection())
+    SELECT count(*) OVER(), 
+        p.product_id, 
+        p.name, 
+        COALESCE(json_agg(json_build_object(
+            'variant_id', pv.variant_id,
+            'color_attr', pv.color_attr,
+			'size_attr', pv.size_attr,
+            'selling_price', pv.selling_price,
+			'sku', pv.sku,
+			'image_url', pv.image_url
+        ) ORDER BY pv.variant_id) FILTER (WHERE pv.variant_id IS NOT NULL), '[]') as variants
+    FROM products p
+    LEFT JOIN product_variants pv ON p.product_id = pv.product_id
+    WHERE (to_tsvector('simple', p.name) @@ plainto_tsquery('simple', $1) OR $1 = '')
+    AND (p.category_id = $2 OR $2 = 0)
+    GROUP BY p.product_id
+    ORDER BY %s %s, p.product_id ASC
+    LIMIT $3 OFFSET $4`, f.sortColumn(), f.sortDirection())
 
 	args := []any{name, categoryID, f.limit(), f.offset()}
 
@@ -152,19 +305,24 @@ func (m ProductModel) GetAllProducts(name string, categoryID int, f Filters) ([]
 
 	for rows.Next() {
 		var p Product
+		var variantsJSON []byte
+
 		err := rows.Scan(
 			&totalRecords,
 			&p.ProductID,
-			&p.CategoryID,
 			&p.Name,
-			&p.Description,
-			&p.IsGstEligible,
-			&p.CreatedAt,
-			&p.UpdatedAt,
+			&variantsJSON,
 		)
 		if err != nil {
 			return nil, Metadata{}, err
 		}
+
+		// Unmarshal the JSON bytes into the product's Variants slice
+		err = json.Unmarshal(variantsJSON, &p.Variants)
+		if err != nil {
+			return nil, Metadata{}, err
+		}
+
 		products = append(products, &p)
 	}
 

@@ -140,14 +140,14 @@ demo/inventory/update:
 .PHONY: demo/profile/create
 demo/profile/create:
 	curl -i -X POST http://localhost:4000/v1/profiles \
-	-d '{"email": "microtech@gmail.com", "password": "pa55word", "full_name": "Alex G", "phone": "555-0199", "address": "123 Go Lane", "district": "Cayo", "town_village": "San Ignacio"}'
+	-d '{"email": "alexguerrate@gmail.com", "password": "pa55word", "full_name": "Alex G", "phone": "555-0199", "address": "123 Go Lane", "district": "Cayo", "town_village": "San Ignacio"}'
 
 
 ## demo/login: Exchange credentials for an authentication token
 .PHONY: demo/login
 demo/login:
 	curl -i -X POST http://localhost:4000/v1/users/login \
-	-d '{"email": "microtechbz@gmail.com", "password": "pa55word"}'
+	-d '{"email": "alexguerrate@gmail.com", "password": "pa55word"}'
 
 ## demo/me: Access the current user's profile (Requires Token)
 # Usage: make demo/me token=YOUR_TOKEN_HERE

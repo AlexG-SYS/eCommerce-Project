@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS product_variants (
     color_attr text,
     cost_price decimal(10, 2) NOT NULL,
     selling_price decimal(10, 2) NOT NULL,
+    image_url text,
     created_at timestamp(0) with time zone NOT NULL DEFAULT NOW()
 );
 

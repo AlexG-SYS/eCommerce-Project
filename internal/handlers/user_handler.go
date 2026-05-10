@@ -274,20 +274,29 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// 1. Retrieve user by email
 	user, err := h.Models.Users.GetByEmail(input.Email)
 	if err != nil {
-		h.App.ErrorJSON(w, http.StatusUnauthorized, "invalid credentials email")
+		h.App.ErrorJSON(w, http.StatusUnauthorized, "Invalid Credentials")
 		return
 	}
 
 	// 2. Verify password hash
 	match, err := user.PasswordMatches(input.Password)
 	if err != nil || !match {
-		h.App.ErrorJSON(w, http.StatusUnauthorized, "invalid credentials")
+		h.App.ErrorJSON(w, http.StatusUnauthorized, "Invalid Credentials")
 		return
+	}
+
+	// 2.5 Check Query Parameter for Admin Portal
+	// If the request came through the /admin/login route
+	if r.URL.Path == "/v1/admin/login" {
+		if user.Role != "Admin" && user.Role != "Staff" {
+			h.App.ErrorJSON(w, http.StatusForbidden, "Access Denied: Admin Only")
+			return
+		}
 	}
 
 	// 3. Check if account is activated
 	if !user.Activated {
-		h.App.ErrorJSON(w, http.StatusForbidden, "your account must be activated to login")
+		h.App.ErrorJSON(w, http.StatusForbidden, "Your account must be activated to login!")
 		return
 	}
 

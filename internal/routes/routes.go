@@ -33,8 +33,14 @@ func SetupRoutes(db *sql.DB, logger *slog.Logger, mailer mailer.Mailer, rps floa
 
 	mux := http.NewServeMux()
 
+	// Create a file server for your static directory
+	fileServer := http.FileServer(http.Dir("./static"))
+
+	mux.Handle("GET /static/", http.StripPrefix("/static/", fileServer))
+	mux.Handle("GET /", fileServer)
 	// --- PUBLIC ROUTES (No Token Required) ---
 	mux.HandleFunc("POST /v1/users/login", h.LoginHandler)
+	mux.HandleFunc("POST /v1/admin/login", h.LoginHandler)
 	mux.HandleFunc("POST /v1/profiles", h.CreateProfileHandler) // Registration
 	mux.HandleFunc("GET /v1/users/activated", h.ActivateUserHandler)
 	mux.HandleFunc("GET /v1/products", h.ListProductsHandler)
@@ -56,14 +62,14 @@ func SetupRoutes(db *sql.DB, logger *slog.Logger, mailer mailer.Mailer, rps floa
 	mux.HandleFunc("GET /v1/locations", mw.RequireRole("Admin", h.ListLocationsHandler))
 	mux.HandleFunc("PATCH /v1/locations/{id}", mw.RequireRole("Admin", h.UpdateLocationHandler))
 
-	mux.HandleFunc("POST /v1/products", mw.RequireRole("Admin", h.CreateProductHandler))
-	mux.HandleFunc("PATCH /v1/products/{id}", mw.RequireRole("Admin", h.UpdateProductHandler))
+	mux.HandleFunc("POST /v1/products", mw.RequireRole("Customer", h.CreateProductHandler))
+	mux.HandleFunc("PATCH /v1/products/{id}", mw.RequireRole("Customer", h.UpdateProductHandler))
 
-	mux.HandleFunc("POST /v1/variants", mw.RequireRole("Admin", h.CreateVariantHandler))
-	mux.HandleFunc("PATCH /v1/variants/{id}", mw.RequireRole("Admin", h.UpdateVariantHandler))
+	mux.HandleFunc("POST /v1/variants", mw.RequireRole("Customer", h.CreateVariantHandler))
+	mux.HandleFunc("PATCH /v1/variants/{id}", mw.RequireRole("Customer", h.UpdateVariantHandler))
 
-	mux.HandleFunc("POST /v1/inventory", mw.RequireRole("Admin", h.CreateInventoryHandler))
-	mux.HandleFunc("PATCH /v1/inventory/{id}", mw.RequireRole("Admin", h.UpdateInventoryHandler))
+	mux.HandleFunc("POST /v1/inventory", mw.RequireRole("Customer", h.CreateInventoryHandler))
+	mux.HandleFunc("PATCH /v1/inventory/{id}", mw.RequireRole("Customer", h.UpdateInventoryHandler))
 
 	mux.HandleFunc("GET /v1/metrics", mw.RequireRole("Admin", h.MetricsHandler))
 
